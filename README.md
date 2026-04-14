@@ -9,7 +9,8 @@
 
 ## 许可证声明 (License)
 
-本仓库采用双重许可协议 (Dual-licensed)：
+本仓库采用双重许可协议 (Dual-licensed)及第三方代码隔离策略：
 
 * **代码资产**：所有软件源代码（包括但不限于 Python、Bash、SKILL、VBA 脚本等）均基于 [MIT License](LICENSE) 授权。
 * **文档资产**：所有学术文档、部署规范及理论说明（如 `docs/` 目录内的 `.md`、`.pdf` 文件等）均基于 [Creative Commons Attribution-NonCommercial 4.0 International License (CC BY-NC 4.0)](https://creativecommons.org/licenses/by-nc/4.0/) 授权。未经明确授权，严禁将文档内容用于商业用途。
+* **第三方资产**：`skill/third_party/` 目录下的代码文件保持其原始的开源协议（如 Apache License 2.0），具体协议条款与版权归属详见各文件头部的法律声明。
