@@ -1,0 +1,37 @@
+{
+  "skill_name": "pandoc-md-publish",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "请把 paper.md 转成 Word，保留参考文献、图表交叉引用和公式，并检查有没有缺失引用或图片路径错误。",
+      "expected_output": "运行前置校验，执行 docx 转换，并给出结构化警告总结。",
+      "files": [
+        "paper.md",
+        "references.bib",
+        "crossref_config.yaml",
+        "elsevier-with-titles.csl",
+        "style_reference2.docx"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "检查这篇 Markdown 是否符合 Pandoc 格式，重点看文献引用、图片引用和图表公式标签是否规范。",
+      "expected_output": "输出 Markdown 预检结果，明确列出缺失文献、未解析交叉引用和损坏图片路径。",
+      "files": [
+        "paper.md",
+        "references.bib"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "把 paper.md 转成 PDF，并在完成后读取 Pandoc 警告，告诉我哪些问题会影响最终排版。",
+      "expected_output": "执行 PDF 转换，读取命令行输出，并归纳高风险告警。",
+      "files": [
+        "paper.md",
+        "references.bib",
+        "crossref_config.yaml",
+        "elsevier-with-titles.csl"
+      ]
+    }
+  ]
+}

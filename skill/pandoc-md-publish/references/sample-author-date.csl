@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<style xmlns="http://purl.org/net/xbiblio/csl" version="1.0" class="in-text" default-locale="en-US">
+  <info>
+    <title>Sample Author-Date</title>
+    <id>https://example.com/csl/sample-author-date</id>
+    <link href="https://example.com/csl/sample-author-date" rel="self"/>
+    <author>
+      <name>Workspace Template</name>
+    </author>
+    <category citation-format="author-date"/>
+    <summary>Minimal CSL template bundled with the pandoc-md-publish skill.</summary>
+    <updated>2026-04-14T00:00:00+00:00</updated>
+    <rights license="https://creativecommons.org/publicdomain/zero/1.0/">CC0 1.0</rights>
+  </info>
+
+  <macro name="author">
+    <names variable="author">
+      <name and="text" delimiter=", " initialize-with=". "/>
+      <substitute>
+        <names variable="editor"/>
+        <text variable="title"/>
+      </substitute>
+    </names>
+  </macro>
+
+  <macro name="issued-year">
+    <date variable="issued">
+      <date-part name="year"/>
+    </date>
+  </macro>
+
+  <macro name="container">
+    <group delimiter=", ">
+      <text variable="container-title" font-style="italic"/>
+      <group delimiter="">
+        <text variable="volume"/>
+        <text variable="issue" prefix="(" suffix=")"/>
+      </group>
+      <text variable="page"/>
+    </group>
+  </macro>
+
+  <citation et-al-min="3" et-al-use-first="1" collapse="year">
+    <sort>
+      <key macro="author"/>
+      <key macro="issued-year"/>
+    </sort>
+    <layout prefix="(" suffix=")" delimiter="; ">
+      <group delimiter=", ">
+        <text macro="author"/>
+        <text macro="issued-year"/>
+      </group>
+    </layout>
+  </citation>
+
+  <bibliography et-al-min="6" et-al-use-first="3" hanging-indent="true" entry-spacing="0" line-spacing="1">
+    <sort>
+      <key macro="author"/>
+      <key macro="issued-year"/>
+      <key variable="title"/>
+    </sort>
+    <layout suffix=".">
+      <group delimiter=". ">
+        <text macro="author"/>
+        <text macro="issued-year" prefix="(" suffix=")"/>
+        <text variable="title"/>
+        <text macro="container"/>
+        <text variable="publisher"/>
+        <text variable="URL"/>
+      </group>
+    </layout>
+  </bibliography>
+</style>

@@ -1,0 +1,44 @@
+# Starter pandoc-crossref configuration for Word and PDF export.
+# Copy this file into the target workspace and adjust labels or style names as needed.
+# This template keeps numbering stable for typical article-style documents.
+
+# ----- Caption titles shown with figures, tables, and equations -----
+# Example output: Fig. 1, Table 2, Eq. 3
+figureTitle: "Fig."
+tableTitle: "Table"
+
+# ----- Prefixes used when referencing labels in the text -----
+# Example Markdown reference: @fig:workflow, @tbl:results, @eq:balance
+figPrefix: "Fig."
+tblPrefix: "Table"
+eqnPrefix: "Eq."
+
+# ----- Equation handling -----
+# Automatically number display equations even if a label is not added manually.
+autoEqnLabels: true
+# Use a table-like layout for equation numbers in docx output, which is usually
+# more stable than inline spacing for Word.
+tableEqns: true
+
+# ----- Numbering and section behavior -----
+# Set to false for continuous numbering through the whole document.
+# Set to true only when the document has proper top-level headings and you want
+# figure/table numbering like 1.1, 1.2, 2.1.
+chapters: false
+# Only matters when chapters: true. Controls section depth used for numbering.
+sectionsDepth: 2
+# Keep numbering global across the document instead of resetting unexpectedly.
+globalNumbering: true
+# Auto-generate labels for section headings so they can be cross-referenced.
+autoSectionLabels: true
+
+# ----- Link behavior -----
+# When true, the full reference text such as "Fig. 2" becomes clickable.
+nameInLink: true
+# Create hyperlinks from references back to the corresponding target.
+linkReferences: true
+
+# ----- Word style mapping -----
+# The style name should exist in the reference docx if you use one.
+# "Figure" is a common paragraph style for centered figures and captions.
+figClass: "Figure"
