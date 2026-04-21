@@ -133,7 +133,7 @@ AI 的训练数据有截止日期，对以下内容可能不准确：
 
 - 数据库密码、API 密钥、访问令牌
 - 服务器地址、内网拓扑信息
-- 公司核心业务逻辑、用户隐私数据
+- 核心数据、隐私数据
 
 **原则**：假设你发给 AI 的所有内容都有可能被记录或泄露，据此决定是否发送。
 
@@ -364,27 +364,7 @@ def strain_energy(stiffness, displacement):
 若出现问题，可通过 git revert 回滚到 commit [hash]
 ```
 
-### commit message编写
 
-良好的 commit message 是项目历史的说明书，可以借助 AI 来生成：
-
-**格式规范（Conventional Commits）：**
-```
-<类型>(<范围>): <简短描述>
-
-[可选的详细说明]
-```
-
-**常用类型：**
-- `feat`: 新功能
-- `fix`: Bug 修复
-- `refactor`: 代码重构
-- `docs`: 文档更新
-- `test`: 测试相关
-
-**让 AI 生成 commit message 的方法：**
-> 以下是本次修改的 `git diff` 内容，请帮我生成一条符合 Conventional Commits 规范的 commit message：
-> `[粘贴 git diff 内容]`
 
 ---
 
@@ -480,6 +460,28 @@ git diff HEAD~1       # 与上一次提交对比
 - 保持小步提交，每次提交只做一件事
 - 提交信息要清晰描述做了什么（借助 AI 生成）
 - AI 辅助开发时，建议在 commit message 中标注关键决策
+
+### commit message编写
+
+良好的 commit message 是项目历史的说明书，可以借助 AI 来生成：
+
+**格式规范（Conventional Commits）：**
+```
+<类型>(<范围>): <简短描述>
+
+[可选的详细说明]
+```
+
+**常用类型：**
+- `feat`: 新功能
+- `fix`: Bug 修复
+- `refactor`: 代码重构
+- `docs`: 文档更新
+- `test`: 测试相关
+
+**让 AI 生成 commit message 的方法：**
+> 以下是本次修改的 `git diff` 内容，请帮我生成一条符合 Conventional Commits 规范的 commit message：
+> `[粘贴 git diff 内容]`
 
 ---
 
