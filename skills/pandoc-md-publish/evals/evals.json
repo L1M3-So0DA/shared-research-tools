@@ -32,6 +32,53 @@
         "crossref_config.yaml",
         "elsevier-with-titles.csl"
       ]
+    },
+    {
+      "id": 4,
+      "prompt": "当系统没有 pandoc，但当前 Python 环境里有 pypandoc_binary 时，验证是否能走 Python 侧 pandoc 兜底，并说明 pandoc-crossref 还需要单独安装。",
+      "expected_output": "识别 pypandoc_binary 或 pypandoc，说明 pandoc 可通过 Python 环境继续转换；同时明确 pandoc-crossref 仍是独立依赖，缺失时要停止并提示安装。",
+      "files": [
+        "paper.md",
+        "references.bib"
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "工作目录里没有 crossref_config.yaml 和 csl 文件时，转换流程是否会自动使用 skill 自带的 references 模板，并在完成后提示用户。",
+      "expected_output": "优先读取工作目录文件，缺失时回退到 skill 的 references/crossref_config.yaml 和 sample-author-date.csl，并在报告里说明使用了 bundled 模板。",
+      "files": [
+        "paper.md"
+      ]
+    },
+    {
+      "id": 6,
+      "prompt": "我的 Windows 机器把 Pandoc 装在 D:\\Pandoc，但 PATH 里还有旧版本；请把 paper.md 转成 Word，并明确使用 D:\\Pandoc\\pandoc.exe 和 D:\\Pandoc\\pandoc-crossref.exe，不要混用 PATH 里的工具。",
+      "expected_output": "优先使用自定义目录里的成对可执行文件，避免 PATH 混源，并在输出里说明实际使用的 pandoc / pandoc-crossref 来源。",
+      "files": [
+        "paper.md",
+        "references.bib",
+        "crossref_config.yaml"
+      ]
+    },
+    {
+      "id": 7,
+      "prompt": "我这台机器上的 pandoc-crossref 是按 Pandoc 3.9 编译的，但当前 pandoc 是 3.9.0.2；继续帮我转换 paper.md，并告诉我这个 warning 是不是还能接受。",
+      "expected_output": "完成转换，同时明确说明这是同大版本但版本号不完全一致的 warning，通常可以继续但需要关注潜在运行时差异。",
+      "files": [
+        "paper.md",
+        "references.bib",
+        "crossref_config.yaml"
+      ]
+    },
+    {
+      "id": 8,
+      "prompt": "这台 Windows 机器下载 GitHub release 经常因为 TLS 失败，pandoc-crossref 还是 .7z 包；请把工具链装到 D:\\Pandoc，再继续把 paper.md 转成 Word。",
+      "expected_output": "走 Windows 安装回退链路，处理下载和 .7z 解压问题，最后完成 docx 转换并说明工具链是否来自自定义目录。",
+      "files": [
+        "paper.md",
+        "references.bib",
+        "crossref_config.yaml"
+      ]
     }
   ]
 }

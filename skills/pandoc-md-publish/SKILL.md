@@ -25,9 +25,28 @@ Use this skill for Markdown publishing workflows that need more than a bare Pand
 - Verify that Pandoc and pandoc-crossref are version-compatible before troubleshooting the Markdown itself.
 - For pdf output, make sure a LaTeX engine such as xelatex is installed and callable.
 
+## Windows Quick Install
+
+When the user allows automation on Windows, follow this order:
+
+1. Ask the user whether to use the default install location (`C:\Program Files\Pandoc`) or a custom location.
+2. Run `scripts/install_windows_toolchain.py` with that location. If the target directory is the default Windows location, try `winget` first and then `choco` for Pandoc; otherwise download the release archive and extract it into the chosen directory.
+3. Detect the installed Pandoc major version and download a matching pandoc-crossref release.
+4. Check the machine for a usable archive tool before extraction. Prefer 7-Zip or Bandizip; if the selected pandoc-crossref asset is `.7z` and no extractor exists, install 7-Zip first.
+5. Verify the installed versions after extraction. Pandoc and pandoc-crossref must match on the major version line before conversion starts. The installer also adds the install directory to the user's PATH and writes a small toolchain record so later runs can rediscover the binaries.
+6. If `C:\Program Files\Pandoc` is not usable, prompt the user to switch to `%LOCALAPPDATA%\Pandoc` or enter a custom directory, then continue installation in that location.
+
+If the user chooses a custom location, keep both executables together and reuse that exact directory on later runs. The installer records the chosen toolchain in `~/.pandoc-md-publish/windows-toolchain.json` so later conversions can rediscover the pair without guessing. If the files are moved manually, or if you already know the custom directory such as `D:\Pandoc`, pass both executables back into `scripts/convert_document.py` via `--pandoc-path` and `--pandoc-crossref` instead of relying on PATH. That keeps `pandoc` and `pandoc-crossref` paired and avoids mixing a custom install with an older PATH entry.
+
+| Pandoc | pandoc-crossref build target | Status |
+| --- | --- | --- |
+| 3.x | 3.x | Supported |
+| 2.x | 2.x | Legacy only |
+| mixed major versions | mixed major versions | Stop and reinstall a matching pair |
+
 ## Default workflow
 
-1. Check whether pandoc and pandoc-crossref are available. If either tool is missing, stop, provide installation guidance, and ask the user whether they want automatic installation before continuing.
+1. Check whether pandoc and pandoc-crossref are available. Prefer explicit user-supplied executable paths first, then any recorded Windows toolchain hint in `~/.pandoc-md-publish/windows-toolchain.json`, then PATH. If pandoc is missing, inspect the active Python environment for pypandoc or pypandoc_binary. If the Python environment already exposes a usable pandoc path, keep going with it; if pypandoc is installed but pandoc is missing, ask the user whether to use the `--download-pandoc` fallback before continuing. If neither path exists, stop, provide installation guidance, and ask the user whether they want automatic installation before continuing. On Windows, the automatic path is `scripts/install_windows_toolchain.py`.
 2. Confirm the target output: docx or pdf.
 3. Inspect the Markdown and only the support files already present in the current working directory or at the exact paths the user provided. Do not recursively search parent folders, sibling projects, or prior output locations for missing dependencies.
 4. Run scripts/validate_markdown.py before conversion.
@@ -40,8 +59,10 @@ If the user only asks for diagnosis, stop after step 4 and report the findings.
 ## Dependency lookup policy
 
 - Inspect support files once per conversion request. Do not keep re-checking or re-searching for dependencies in other folders.
-- Resolve `references.bib`, `*.csl`, `crossref_config.yaml`, and `style_reference.docx` only in the current working directory or at the exact path the user already supplied.
-- If a support file is not present there, mark it as missing and tell the user to create or copy it by following the bundled template. Do not hunt through parent folders, sibling workspaces, downloads, or cloud-sync locations, and do not offer to supply the file yourself.
+- When a custom install is recorded, prefer that paired toolchain over unrelated PATH entries so the converter does not mix executables from different installs.
+- Resolve `references.bib`, `*.csl`, and `crossref_config.yaml` in the current working directory or at the exact path the user already supplied first, then fall back to the bundled templates under this skill's `references/` folder when the workspace copy is missing.
+- If a workspace copy is missing and a bundled template is used, keep going but record the fallback so the user can override it later if needed.
+- Resolve `style_reference.docx` only in the current working directory or at the exact path the user already supplied; there is no bundled docx template in this skill.
 - For images, trust the path written in the Markdown. Resolve it relative to the Markdown source file only. If the file is absent, report it as missing and do not try alternate names or locations.
 
 ## Commands
@@ -117,6 +138,19 @@ python scripts/convert_document.py \
   --strict
 ```
 
+### Python-side pandoc fallback
+
+If the user already has pypandoc or pypandoc_binary in the active Python environment, pandoc can be installed or discovered from that environment without requiring a separate system-wide pandoc package.
+
+```powershell
+python scripts/convert_document.py \
+  paper.md \
+  --to docx \
+  --output paper.docx \
+  --download-pandoc \
+  --workspace-root .
+```
+
 ## Equation modes
 
 - docx defaults to word mode: remove LaTeX tag blocks like \tag{...} before conversion because they often break docx math conversion.
@@ -157,6 +191,7 @@ Use these as reference templates. If the target project already has its own bibl
 ## If Pandoc Is Missing
 
 - Do not suggest creating a Python virtual environment to install Pandoc or pandoc-crossref. They are standalone executables.
+- pypandoc and pypandoc_binary can help with pandoc only. pandoc-crossref still needs to be installed separately because it is the filter that resolves figure, table, equation, and section references.
 - If the user chooses manual installation, provide the Pandoc GitHub repository https://github.com/jgm/pandoc and the pandoc-crossref GitHub repository https://github.com/lierdakil/pandoc-crossref. Tell the user to download the appropriate Windows release assets from each project's Releases page.
 - On Windows, place pandoc.exe and pandoc-crossref.exe either in C:\Program Files\Pandoc\ or somewhere already on PATH.
 - Make sure the pandoc-crossref build matches the installed major Pandoc version before retrying conversion.
@@ -179,7 +214,8 @@ When using this skill, return:
 3. Whether conversion succeeded.
 4. A concise warning summary from Pandoc output.
 5. Concrete next fixes if there are unresolved references or missing assets.
-6. After successful conversion, you must end the response with the exact summary block below. This block is mandatory, must appear verbatim, and must be the final content in the message. Do not paraphrase it, do not omit fields, and do not append any text after it.
+6. After successful conversion, include the exact summary block below. This block is mandatory and must appear verbatim. Do not paraphrase it and do not omit fields.
+7. If any bibliography, CSL, crossref, or reference-doc file was missing and a bundled template from `references/` was used instead, append a short note immediately after the block that names each missing file, names the bundled file used in its place, and tells the user they can copy and adapt the example files under `references/` to provide their own version.
 
 ```
 ✓ Markdown → Word Conversion Complete
@@ -198,7 +234,7 @@ If the user asked for a command, give the exact command you used or would use.
 
 ## Troubleshooting
 
-- If Pandoc executable not found or pandoc-crossref executable not found appears, stop and handle that as toolchain setup. Provide installation guidance first, then ask whether the user wants automatic installation.
+- If Pandoc executable not found or pandoc-crossref executable not found appears, stop and handle that as toolchain setup. Provide installation guidance first, then ask whether the user wants automatic installation through `scripts/install_windows_toolchain.py`.
 - If docx or pdf conversion fails before reading the Markdown, check the Pandoc and pandoc-crossref version pairing first.
 - If Pandoc says it could not fetch a resource, treat that as a broken image or asset path and tell the user whether Pandoc replaced it with alt text or description.
 - If pdf conversion fails with xelatex or another engine error, separate environment issues from Markdown issues in the report.
