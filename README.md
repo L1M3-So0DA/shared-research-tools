@@ -19,6 +19,7 @@
 | SKILL | 作用 | 适用场景 |
 | --- | --- | --- |
 | pandoc-md-publish | 将 Markdown 发布为 Word 或 PDF，并在转换前后检查引用、图表、公式和 Pandoc 警告。 | 论文、报告、讲义、技术说明的导出和排错。 |
+| paper-format-normalizer | 将 Markdown 规范化为 Pandoc 友好的格式，支持诊断和重写两种模式。 | 论文 Markdown 的清洗、规范化和预发布检查。 |
 | patent-writing | 将技术方案整理为中文发明专利草案或软件著作权材料，支持按模板补写、改写和扩写。 | 专利交底书、发明点整理、权利要求前置材料、已有专利改写。 |
 | third_party/doc-to-markdown | 将 DOCX/PDF/PPTX/XLSX 等文档转换为高质量 Markdown，并进行后处理和结果验证。 | 批量文档转码、保留表格/图片、整理资料到 Markdown。 |
 | third_party/skill-creator | 创建、改进、评测和调优 SKILL，支持测试提示词、对比基线和查看评测结果。 | 新建 SKILL、优化 SKILL 触发词、跑评测和做迭代。 |
