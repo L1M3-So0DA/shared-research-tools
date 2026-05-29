@@ -28,6 +28,9 @@ Use this checklist before conversion when the user wants reliable references, fi
 - For equation cross-references, add labels such as {#eq:loss} to display equations.
 - For docx output, LaTeX tag commands like \tag{1} often need to be removed or converted before Pandoc can build Word equations reliably.
 - If the user wants to preserve raw LaTeX instead of rendering Word equations, use the raw-latex mode in the conversion script.
+- For a DOCX in which all formulas are AxMath objects, use `--equation-mode axmath`; write inline formulas as `$...$` and display formulas as `$$...$$`.
+- AxMath conversion requires Windows, Word, and the AxMath add-in. The postprocessor groups formula-containing body paragraphs, skips headings, and runs `AMSTeX2AM` on each group so heading sizes do not affect formula sizes.
+- Use `--axmath-visible` only for diagnosis when Word COM or the AxMath add-in appears to hang; a successful run should include `Segmented body AMSTeX2AM conversion finished.` and `residual_tex=0` in the `.axmath.log`.
 
 ## Word style reference
 

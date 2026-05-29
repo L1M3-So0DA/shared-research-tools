@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import urllib.request
+import zipfile
 from pathlib import Path
 
 CURRENT_DIR = Path(__file__).resolve().parent
@@ -54,8 +55,29 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--workspace-root", default=".", help="Root directory for resolving relative paths.")
     parser.add_argument(
         "--equation-mode",
-        choices=["word", "raw-latex", "native"],
-        help="Equation handling mode. docx defaults to 'word'; pdf defaults to 'native'.",
+        choices=["word", "raw-latex", "native", "axmath"],
+        help="Equation handling mode. docx defaults to 'word'; 'axmath' converts all DOCX equations through AxMath.",
+    )
+    parser.add_argument(
+        "--axmath-template",
+        help=(
+            "Optional path to AxMath.dotm or AxMath.exe used when --equation-mode axmath is selected. "
+            "When omitted, the AxMath postprocessor searches common Windows install locations automatically."
+        ),
+    )
+    parser.add_argument("--axmath-log", help="Path for the AxMath post-processing log.")
+    parser.add_argument(
+        "--axmath-visible",
+        action="store_true",
+        help="Show Word while AxMath post-processing runs. Useful when the add-in requires an interactive desktop session.",
+    )
+    parser.add_argument(
+        "--axmath-field-code-equation-numbers",
+        action="store_true",
+        help=(
+            "After AxMath conversion, convert pandoc-crossref numbered equation tables into "
+            "tabbed Word paragraphs with SEQ Equation field-code numbers. Off by default."
+        ),
     )
     parser.add_argument("--pdf-engine", default="xelatex", help="PDF engine used for pdf conversion.")
     parser.add_argument(
@@ -285,6 +307,11 @@ def determine_equation_mode(target: str, requested_mode: str | None) -> str:
     return "word" if target == "docx" else "native"
 
 
+def validate_equation_mode_for_target(target: str, equation_mode: str) -> None:
+    if equation_mode == "axmath" and target != "docx":
+        raise ValueError("The axmath equation mode is only supported for docx output.")
+
+
 def get_version_output(executable: str) -> str:
     result = subprocess.run([executable, "--version"], capture_output=True, text=True)
     return (result.stdout or result.stderr).strip()
@@ -446,10 +473,287 @@ def build_toolchain_report(
 
 
 def build_input_format(equation_mode: str) -> str:
-    input_format = "markdown"
-    if equation_mode == "raw-latex":
-        input_format += "-tex_math_dollars-tex_math_single_backslash-tex_math_double_backslash-raw_tex"
-    return input_format
+    return "markdown"
+
+
+def build_math_to_raw_tex_filter_args(equation_mode: str) -> list[str]:
+    if equation_mode not in {"raw-latex", "axmath"}:
+        return []
+    return ["--lua-filter", str(CURRENT_DIR / "math_to_raw_tex.lua")]
+
+
+def should_convert_axmath_equation_numbers_to_fields(equation_mode: str, requested: bool) -> bool:
+    return equation_mode == "axmath" and requested
+
+
+def build_axmath_postprocess_command(
+    script_path: Path,
+    input_docx: Path,
+    output_docx: Path,
+    log_path: Path,
+    template_path: Path | None,
+    visible: bool = False,
+) -> list[str]:
+    command = [
+        "powershell",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        str(script_path),
+        "-InputDocx",
+        str(input_docx),
+        "-OutputDocx",
+        str(output_docx),
+        "-LogPath",
+        str(log_path),
+        "-Force",
+    ]
+    if template_path:
+        command.extend(["-TemplatePath", str(template_path)])
+    if visible:
+        command.append("-Visible")
+    return command
+
+
+def run_axmath_postprocessor(command: list[str]) -> dict:
+    result = subprocess.run(command, capture_output=True, text=True)
+    return {
+        "success": result.returncode == 0,
+        "command": command,
+        "stdout": result.stdout,
+        "stderr": result.stderr,
+        "returncode": result.returncode,
+    }
+
+
+def cleanup_axmath_cjk_italic_leaks(docx_path: Path) -> int:
+    """Remove italic formatting that AxMath can leak into following CJK text runs."""
+    word_document = "word/document.xml"
+    paragraph_pattern = re.compile(r"<w:p(?:\s[^>]*)?>.*?</w:p>", re.DOTALL)
+    run_pattern = re.compile(r"<w:r(?:\s[^>]*)?>.*?</w:r>", re.DOTALL)
+    text_pattern = re.compile(r"<w:t(?:\s[^>]*)?>(.*?)</w:t>", re.DOTALL)
+    italic_pattern = re.compile(r"<w:i(?:\s[^>]*)?/>|<w:iCs(?:\s[^>]*)?/>")
+
+    def has_axmath_object(run_xml: str) -> bool:
+        return "ProgID=\"Equation.AxMath\"" in run_xml or "ProgID='Equation.AxMath'" in run_xml
+
+    def run_text(run_xml: str) -> str:
+        return "".join(match.group(1) for match in text_pattern.finditer(run_xml))
+
+    def has_cjk(text: str) -> bool:
+        return any("\u4e00" <= char <= "\u9fff" for char in text)
+
+    def remove_italic(run_xml: str) -> tuple[str, bool]:
+        updated = italic_pattern.sub("", run_xml)
+        updated = re.sub(r"<w:rPr>\s*</w:rPr>", "", updated)
+        return updated, updated != run_xml
+
+    def clean_paragraph(paragraph_xml: str) -> tuple[str, int]:
+        pieces: list[str] = []
+        cursor = 0
+        cleaned = 0
+        after_axmath_object = False
+
+        for match in run_pattern.finditer(paragraph_xml):
+            pieces.append(paragraph_xml[cursor : match.start()])
+            run_xml = match.group(0)
+
+            if has_axmath_object(run_xml):
+                pieces.append(run_xml)
+                after_axmath_object = True
+                cursor = match.end()
+                continue
+
+            text = run_text(run_xml)
+            if not text.strip():
+                pieces.append(run_xml)
+                cursor = match.end()
+                continue
+
+            if after_axmath_object and has_cjk(text):
+                updated_run, changed = remove_italic(run_xml)
+                pieces.append(updated_run)
+                if changed:
+                    cleaned += 1
+                after_axmath_object = False
+                cursor = match.end()
+                continue
+
+            pieces.append(run_xml)
+            after_axmath_object = False
+            cursor = match.end()
+
+        pieces.append(paragraph_xml[cursor:])
+        return "".join(pieces), cleaned
+
+    with zipfile.ZipFile(docx_path, "r") as source_archive:
+        try:
+            document_xml = source_archive.read(word_document)
+        except KeyError:
+            return 0
+        archive_entries = {entry.filename: source_archive.read(entry.filename) for entry in source_archive.infolist()}
+
+    cleaned_count = 0
+    document_text = document_xml.decode("utf-8")
+
+    pieces: list[str] = []
+    cursor = 0
+    for match in paragraph_pattern.finditer(document_text):
+        pieces.append(document_text[cursor : match.start()])
+        updated_paragraph, paragraph_cleaned = clean_paragraph(match.group(0))
+        pieces.append(updated_paragraph)
+        cleaned_count += paragraph_cleaned
+        cursor = match.end()
+    pieces.append(document_text[cursor:])
+
+    if cleaned_count == 0:
+        return 0
+
+    archive_entries[word_document] = "".join(pieces).encode("utf-8")
+    temp_zip_path = docx_path.with_name(docx_path.name + ".tmp")
+    with zipfile.ZipFile(temp_zip_path, "w", compression=zipfile.ZIP_DEFLATED) as target_archive:
+        for filename, content in archive_entries.items():
+            target_archive.writestr(filename, content)
+    shutil.move(str(temp_zip_path), str(docx_path))
+    return cleaned_count
+
+
+def convert_numbered_equation_tables_to_field_paragraphs(docx_path: Path) -> int:
+    """Convert numbered display-equation tables to tabbed paragraphs with SEQ fields."""
+    word_document = "word/document.xml"
+    table_pattern = re.compile(r"<w:tbl(?:\s[^>]*)?>.*?</w:tbl>", re.DOTALL)
+    grid_pattern = re.compile(r"<w:tblGrid>.*?</w:tblGrid>", re.DOTALL)
+    grid_col_pattern = re.compile(r'<w:gridCol\s+w:w="(\d+)"\s*/>')
+    cell_pattern = re.compile(r"<w:tc(?:\s[^>]*)?>.*?</w:tc>", re.DOTALL)
+    paragraph_pattern = re.compile(r"<w:p(?:\s[^>]*)?>.*?</w:p>", re.DOTALL)
+    paragraph_properties_pattern = re.compile(r"<w:pPr(?:\s[^>]*)?>.*?</w:pPr>", re.DOTALL)
+    run_pattern = re.compile(r"<w:r(?:\s[^>]*)?>.*?</w:r>", re.DOTALL)
+    number_text_pattern = re.compile(r"<w:t(?:\s[^>]*)?>\(?(\d+(?:\.\d+)*)\)\.?</w:t>")
+    bookmark_start_pattern = re.compile(r'<w:bookmarkStart\b[^>]*/>')
+    bookmark_end_pattern = re.compile(r'<w:bookmarkEnd\b[^>]*/>')
+
+    def has_axmath(cell_xml: str) -> bool:
+        return "ProgID=\"Equation.AxMath\"" in cell_xml or "ProgID='Equation.AxMath'" in cell_xml
+
+    def plain_number(cell_xml: str) -> str | None:
+        if has_axmath(cell_xml):
+            return None
+        match = number_text_pattern.search(cell_xml)
+        return match.group(1) if match else None
+
+    def first_paragraph(cell_xml: str) -> str | None:
+        match = paragraph_pattern.search(cell_xml)
+        return match.group(0) if match else None
+
+    def formula_runs(paragraph_xml: str) -> str:
+        runs = [run.group(0) for run in run_pattern.finditer(paragraph_xml)]
+        return "".join(run_xml for run_xml in runs if "Equation.AxMath" in run_xml)
+
+    def bookmarks(table_xml: str) -> tuple[str, str]:
+        starts = "".join(match.group(0) for match in bookmark_start_pattern.finditer(table_xml))
+        ends = "".join(match.group(0) for match in bookmark_end_pattern.finditer(table_xml))
+        return starts, ends
+
+    def paragraph_style(paragraph_xml: str) -> str:
+        match = paragraph_properties_pattern.search(paragraph_xml)
+        if not match:
+            return ""
+        style_match = re.search(r'<w:pStyle\s+w:val="([^"]+)"\s*/>', match.group(0))
+        if not style_match:
+            return ""
+        return f'<w:pStyle w:val="{style_match.group(1)}"/>'
+
+    def field_number_run(number: str) -> str:
+        # The cached display text keeps the exported DOCX readable before Word updates fields.
+        return (
+            '<w:fldSimple w:instr=" SEQ Equation \\* ARABIC \\# &quot;(0)&quot; ">'
+            f'<w:r><w:t>({number})</w:t></w:r>'
+            '</w:fldSimple>'
+        )
+
+    def convert_table(table_xml: str) -> tuple[str, bool]:
+        cells = cell_pattern.findall(table_xml)
+        number = plain_number(cells[1]) if len(cells) == 2 else None
+        if len(cells) != 2 or not has_axmath(cells[0]) or not number:
+            return table_xml, False
+
+        grid = grid_pattern.search(table_xml)
+        if not grid:
+            return table_xml, False
+        widths = [int(match.group(1)) for match in grid_col_pattern.finditer(grid.group(0))]
+        if len(widths) != 2:
+            return table_xml, False
+
+        total_width = sum(widths)
+        if total_width <= 0:
+            return table_xml, False
+
+        paragraph_xml = first_paragraph(cells[0])
+        if not paragraph_xml:
+            return table_xml, False
+        runs = formula_runs(paragraph_xml)
+        if not runs:
+            return table_xml, False
+
+        bookmark_starts, bookmark_ends = bookmarks(table_xml)
+        center_tab = total_width // 2
+        style = paragraph_style(paragraph_xml)
+        converted = (
+            f"{bookmark_starts}"
+            '<w:p><w:pPr>'
+            f"{style}"
+            '<w:tabs>'
+            f'<w:tab w:val="center" w:pos="{center_tab}"/>'
+            f'<w:tab w:val="right" w:pos="{total_width}"/>'
+            '</w:tabs>'
+            '<w:jc w:val="left"/>'
+            '</w:pPr>'
+            '<w:r><w:tab/></w:r>'
+            f"{runs}"
+            '<w:r><w:tab/></w:r>'
+            f"{field_number_run(number)}"
+            '</w:p>'
+            f"{bookmark_ends}"
+        )
+        return converted, True
+
+    with zipfile.ZipFile(docx_path, "r") as source_archive:
+        try:
+            document_xml = source_archive.read(word_document)
+        except KeyError:
+            return 0
+        archive_entries = {entry.filename: source_archive.read(entry.filename) for entry in source_archive.infolist()}
+
+    document_text = document_xml.decode("utf-8")
+    balanced_count = 0
+    pieces: list[str] = []
+    cursor = 0
+    for match in table_pattern.finditer(document_text):
+        pieces.append(document_text[cursor : match.start()])
+        balanced_table, changed = convert_table(match.group(0))
+        pieces.append(balanced_table)
+        if changed:
+            balanced_count += 1
+        cursor = match.end()
+    pieces.append(document_text[cursor:])
+
+    if balanced_count == 0:
+        return 0
+
+    archive_entries[word_document] = "".join(pieces).encode("utf-8")
+    temp_zip_path = docx_path.with_name(docx_path.name + ".tmp")
+    with zipfile.ZipFile(temp_zip_path, "w", compression=zipfile.ZIP_DEFLATED) as target_archive:
+        for filename, content in archive_entries.items():
+            target_archive.writestr(filename, content)
+    shutil.move(str(temp_zip_path), str(docx_path))
+    return balanced_count
+
+
+def combine_axmath_stage_success(pandoc_returncode: int, postprocess: dict | None) -> bool:
+    if pandoc_returncode != 0:
+        return False
+    return bool(postprocess and postprocess.get("success"))
 
 
 def merge_markdown_files(input_files: list[Path], remove_tags: bool) -> str:
@@ -530,6 +834,11 @@ def main() -> int:
         return 2
 
     equation_mode = determine_equation_mode(args.to, args.equation_mode)
+    try:
+        validate_equation_mode_for_target(args.to, equation_mode)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
     python_pandoc_support = detect_python_pandoc_support()
 
     registered_pandoc_paths, registered_crossref_paths = load_registered_toolchain_paths()
@@ -659,36 +968,10 @@ def main() -> int:
         return 2
 
     if toolchain["compatible"] is False:
-        report = {
-            "success": False,
-            "stage": "toolchain",
-            "target": args.to,
-            "output": str(output_path),
-            "equation_mode": equation_mode,
-            "toolchain": toolchain,
-            "support_files": support_notes,
-            "messages": [
-                {
-                    "kind": "pandoc_toolchain_incompatible",
-                    "severity": "error",
-                    "message": toolchain["warning"] or "Pandoc and pandoc-crossref versions are incompatible.",
-                }
-            ],
-            "reason": "Pandoc and pandoc-crossref major versions do not match.",
-            "preflight": None,
-            "bib_merge": None,
-            "command": None,
-            "stdout": "",
-            "stderr": "",
-            "returncode": 2,
-            "temp_dir": None,
-        }
-        write_report(report, report_path)
         print(
             toolchain["warning"] or "Pandoc and pandoc-crossref major versions do not match.",
             file=sys.stderr,
         )
-        return 2
 
     for note in support_notes:
         print(note["message"], file=sys.stderr)
@@ -737,6 +1020,7 @@ def main() -> int:
         return 2
 
     keep_temp_dir = None
+    axmath_postprocess = None
     with tempfile.TemporaryDirectory(prefix="pandoc-md-publish-") as temp_dir_name:
         temp_dir = Path(temp_dir_name)
         merged_markdown = temp_dir / "merged.md"
@@ -751,8 +1035,10 @@ def main() -> int:
             merged_bib = temp_dir / "merged.bib"
             bib_merge_report = merge_bibliography_files(bib_files, merged_bib)
 
-        command = [pandoc, str(merged_markdown), "-f", input_format, "-o", str(output_path)]
+        pandoc_output_path = temp_dir / (output_path.stem + ".raw-latex.docx") if equation_mode == "axmath" else output_path
+        command = [pandoc, str(merged_markdown), "-f", input_format, "-o", str(pandoc_output_path)]
         command.extend(["--filter", pandoc_crossref])
+        command.extend(build_math_to_raw_tex_filter_args(equation_mode))
 
         if crossref_config:
             command.extend(["-M", f"crossrefYaml={crossref_config}"])
@@ -787,8 +1073,58 @@ def main() -> int:
             if merged_bib and merged_bib.exists():
                 shutil.copy2(merged_bib, keep_temp_dir / merged_bib.name)
 
+        if equation_mode == "axmath" and result.returncode == 0:
+            axmath_log_path = (
+                resolve_path(args.axmath_log, workspace_root)
+                if args.axmath_log
+                else output_path.with_name(output_path.name + ".axmath.log")
+            )
+            axmath_template_path = resolve_path(args.axmath_template, workspace_root) if args.axmath_template else None
+            postprocess_command = build_axmath_postprocess_command(
+                script_path=CURRENT_DIR / "postprocess_axmath.ps1",
+                input_docx=pandoc_output_path,
+                output_docx=output_path,
+                log_path=axmath_log_path,
+                template_path=axmath_template_path,
+                visible=args.axmath_visible,
+            )
+            axmath_postprocess = run_axmath_postprocessor(postprocess_command)
+            axmath_postprocess["raw_latex_docx"] = str(pandoc_output_path)
+            axmath_postprocess["log_path"] = str(axmath_log_path)
+            if axmath_postprocess["success"]:
+                axmath_postprocess["cjk_italic_leak_cleaned_runs"] = cleanup_axmath_cjk_italic_leaks(output_path)
+                convert_equation_numbers_to_fields = should_convert_axmath_equation_numbers_to_fields(
+                    equation_mode,
+                    args.axmath_field_code_equation_numbers,
+                )
+                axmath_postprocess["field_code_equation_numbers_requested"] = convert_equation_numbers_to_fields
+                axmath_postprocess["field_code_equation_number_paragraphs"] = (
+                    convert_numbered_equation_tables_to_field_paragraphs(output_path)
+                    if convert_equation_numbers_to_fields
+                    else 0
+                )
+
+        if equation_mode == "axmath" and (
+            args.keep_temp or result.returncode != 0 or not axmath_postprocess or not axmath_postprocess["success"]
+        ):
+            if pandoc_output_path.exists():
+                diagnostic_raw_docx = output_path.with_name(output_path.stem + ".raw-latex.docx")
+                shutil.copy2(pandoc_output_path, diagnostic_raw_docx)
+                if axmath_postprocess is not None:
+                    axmath_postprocess["raw_latex_docx"] = str(diagnostic_raw_docx)
+
+        conversion_success = (
+            combine_axmath_stage_success(result.returncode, axmath_postprocess)
+            if equation_mode == "axmath"
+            else result.returncode == 0
+        )
+        final_returncode = (
+            axmath_postprocess["returncode"]
+            if equation_mode == "axmath" and result.returncode == 0 and axmath_postprocess is not None
+            else result.returncode
+        )
         report = {
-            "success": result.returncode == 0,
+            "success": conversion_success,
             "stage": "conversion",
             "target": args.to,
             "output": str(output_path),
@@ -801,8 +1137,9 @@ def main() -> int:
             "messages": parsed_messages,
             "stdout": result.stdout,
             "stderr": result.stderr,
-            "returncode": result.returncode,
+            "returncode": final_returncode,
             "temp_dir": str(keep_temp_dir) if keep_temp_dir else None,
+            "axmath_postprocess": axmath_postprocess,
         }
         write_report(report, report_path)
 
@@ -810,17 +1147,21 @@ def main() -> int:
             print(result.stdout.strip())
         if result.stderr.strip():
             print(result.stderr.strip(), file=sys.stderr)
+        if axmath_postprocess and axmath_postprocess["stdout"].strip():
+            print(axmath_postprocess["stdout"].strip())
+        if axmath_postprocess and axmath_postprocess["stderr"].strip():
+            print(axmath_postprocess["stderr"].strip(), file=sys.stderr)
 
         warning_count = len([message for message in parsed_messages if message["severity"] == "warning"])
         error_count = len([message for message in parsed_messages if message["severity"] == "error"])
-        if result.returncode == 0:
+        if conversion_success:
             print(f"Conversion succeeded: {output_path}")
         else:
-            print(f"Conversion failed with return code {result.returncode}.", file=sys.stderr)
+            print(f"Conversion failed with return code {final_returncode}.", file=sys.stderr)
         print(f"Pandoc message summary: warnings={warning_count}, errors={error_count}")
         print(f"Structured report written to: {report_path}")
 
-        return result.returncode
+        return final_returncode
 
 
 if __name__ == "__main__":

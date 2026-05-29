@@ -51,7 +51,7 @@ If the user chooses a custom location, keep both executables together and reuse 
 3. Inspect the Markdown and only the support files already present in the current working directory or at the exact paths the user provided. Do not recursively search parent folders, sibling projects, or prior output locations for missing dependencies.
 4. Run scripts/validate_markdown.py before conversion.
 5. If validation surfaces obvious issues, fix them before converting unless the user asked for diagnostics only.
-6. Run scripts/convert_document.py with the appropriate options.
+6. Run scripts/convert_document.py with the appropriate options. For docx + axmath mode, omit `--axmath-template` first so the postprocessor can auto-discover AxMath from common Windows install locations. Only add `--axmath-template` when AxMath is installed in a custom location or auto-discovery fails, and in that case ask the user for the exact `AxMath.dotm` or `AxMath.exe` path instead of hardcoding a machine-specific default into the workflow.
 7. Read the generated conversion report and summarize warnings, unresolved citations, broken image paths, and failed references.
 
 If the user only asks for diagnosis, stop after step 4 and report the findings.
@@ -62,7 +62,8 @@ If the user only asks for diagnosis, stop after step 4 and report the findings.
 - When a custom install is recorded, prefer that paired toolchain over unrelated PATH entries so the converter does not mix executables from different installs.
 - Resolve `references.bib`, `*.csl`, and `crossref_config.yaml` in the current working directory or at the exact path the user already supplied first, then fall back to the bundled templates under this skill's `references/` folder when the workspace copy is missing.
 - If a workspace copy is missing and a bundled template is used, keep going but record the fallback so the user can override it later if needed.
-- Resolve `style_reference.docx` only in the current working directory or at the exact path the user already supplied; there is no bundled docx template in this skill.
+- Resolve `style_reference.docx` only in the current working directory or at the exact path the user already supplied. If no Word reference template is provided or found, continue without `--reference-doc` so Pandoc uses its built-in default Word styles, and record that no reference template was used.
+- Resolve `--axmath-template` only when `--equation-mode axmath` is selected. Prefer an explicit user-supplied `AxMath.dotm` or `AxMath.exe` path first; if it is omitted, let the AxMath postprocessor search common Windows install locations automatically. If no candidate is found, stop and ask the user for the exact path instead of baking a workstation-specific location into the command example.
 - For images, trust the path written in the Markdown. Resolve it relative to the Markdown source file only. If the file is absent, report it as missing and do not try alternate names or locations.
 
 ## Commands
@@ -89,6 +90,35 @@ python scripts/convert_document.py \
   --reference-doc style_reference2.docx \
   --workspace-root .
 ```
+
+### Convert to Word with all formulas as AxMath objects
+
+This mode requires Windows, Microsoft Word, and AxMath. It first creates a raw-LaTeX DOCX, then opens Word and converts only the body paragraph ranges that contain TeX formulas. Heading paragraphs are excluded from the AxMath selection so heading font sizes do not affect formula object sizes. This is the only AxMath conversion route: it does not select the whole document, apply AxMath's default equation format, or run proportional object-size fixups after conversion. Run it from a logged-in desktop session and use `--axmath-visible` only when diagnosis needs a visible Word window.
+
+```powershell
+python scripts/convert_document.py `
+  paper.md `
+  --to docx `
+  --output paper-axmath.docx `
+  --equation-mode axmath `
+  --workspace-root .
+```
+
+By default, do not pass `--axmath-template`. The AxMath postprocessor will auto-discover `AxMath.dotm` from common Windows install locations. If auto-discovery fails or AxMath is installed in a custom location, ask the user for the exact `AxMath.dotm` or `AxMath.exe` path and rerun with `--axmath-template`.
+
+If AxMath is installed in a custom location and the user already knows the path, pass it explicitly:
+
+```powershell
+python scripts/convert_document.py `
+  paper.md `
+  --to docx `
+  --output paper-axmath.docx `
+  --equation-mode axmath `
+  --axmath-template "C:\path\to\AxMath.dotm" `
+  --workspace-root .
+```
+
+If the user explicitly wants pandoc-crossref numbered display equations converted from DOCX tables into tabbed Word paragraphs with `SEQ Equation` field-code numbers, add `--axmath-field-code-equation-numbers`. Do not enable this by default. If the source Markdown has no equation labels such as `{#eq:...}` or no equation references, leave the option off.
 
 ### Convert to PDF
 
@@ -155,6 +185,7 @@ python scripts/convert_document.py \
 
 - docx defaults to word mode: remove LaTeX tag blocks like \tag{...} before conversion because they often break docx math conversion.
 - raw-latex mode keeps raw TeX instead of asking Pandoc to parse math. Use this when the user explicitly wants the LaTeX source preserved.
+- axmath mode is available for docx output only. It first creates a temporary DOCX with delimited TeX, then runs AxMath's `AMSTeX2AM` conversion in Word over formula-containing body paragraph ranges while skipping headings. This avoids AxMath sizing formulas from title or heading styles when a document contains mixed-size headings and body text. It verifies that the formulas became AxMath OLE objects and that no delimited TeX remains. After AxMath conversion, it removes italic formatting that AxMath can leak into immediately following CJK text runs and records the cleaned run count in the conversion report. If `--axmath-template` is omitted, the postprocessor auto-discovers `AxMath.dotm` from common Windows install locations; if discovery fails, ask the user for the exact template or executable path and rerun with `--axmath-template`. If `--axmath-field-code-equation-numbers` is explicitly supplied, pandoc-crossref numbered equation tables are converted into tabbed Word paragraphs with `SEQ Equation` field-code numbers; otherwise this structural rewrite is skipped. Failed conversions, or runs with `--keep-temp`, preserve a raw-LaTeX diagnostic DOCX.
 - pdf defaults to native mode so Pandoc can typeset formulas normally.
 
 ## Supporting files
@@ -167,9 +198,9 @@ The following files can be provided to customize the conversion. Only the Markdo
 | Bibliography | references.bib or *.bib | No | Citation definitions for citeproc | Ask the user to add a bibliography file by copying the bundled template in `references/`. |
 | Citation Style | *.csl | No | Formatting rules for bibliography (APA, Nature, Chicago, etc.) | Ask the user to add a CSL file by copying the bundled template in `references/`. |
 | Crossref Config | crossref_config.yaml | No | Configuration for figure, table, equation, and section labels | Ask the user to add a crossref config by copying the bundled template in `references/`. |
-| Reference Template | style_reference.docx | No | docx reference for Word formatting (fonts, spacing, heading styles) | Ask the user to add a reference doc by copying the bundled template in `references/`. |
+| Reference Template | style_reference.docx | No | docx reference for Word formatting (fonts, spacing, heading styles) | Continue with Pandoc's built-in default Word styles and report that no reference template was provided. |
 
-If a file is not provided when the user intends to use it, the conversion still succeeds but produces a degraded output. Report the file as missing and direct the user to fill it in by following the bundled template; do not try to find substitutes elsewhere.
+If bibliography, CSL, or crossref configuration is not provided when the user intends to use it, the conversion still succeeds but produces a degraded output. Report the missing file and direct the user to the bundled templates under `references/`; do not try to find substitutes elsewhere. If no Word reference template is provided, do not treat it as a failure: let Pandoc use its built-in default Word styles and tell the user that the output did not use a custom reference docx.
 
 ## Bundled templates
 
@@ -215,10 +246,11 @@ When using this skill, return:
 4. A concise warning summary from Pandoc output.
 5. Concrete next fixes if there are unresolved references or missing assets.
 6. After successful conversion, include the exact summary block below. This block is mandatory and must appear verbatim. Do not paraphrase it and do not omit fields.
-7. If any bibliography, CSL, crossref, or reference-doc file was missing and a bundled template from `references/` was used instead, append a short note immediately after the block that names each missing file, names the bundled file used in its place, and tells the user they can copy and adapt the example files under `references/` to provide their own version.
+7. If any bibliography, CSL, or crossref file was missing and a bundled template from `references/` was used instead, append a short note immediately after the block that names each missing file, names the bundled file used in its place, and tells the user they can copy and adapt the example files under `references/` to provide their own version.
+8. If no reference-doc was provided or found, append a short note immediately after the block that says Pandoc's built-in default Word styles were used because no custom Word reference template was provided.
 
 ```
-✓ Markdown → Word Conversion Complete
+Markdown to Word Conversion Complete
 
 Input File:          [original-file.md]
 Output File:         [output-file.docx]
@@ -239,6 +271,8 @@ If the user asked for a command, give the exact command you used or would use.
 - If Pandoc says it could not fetch a resource, treat that as a broken image or asset path and tell the user whether Pandoc replaced it with alt text or description.
 - If pdf conversion fails with xelatex or another engine error, separate environment issues from Markdown issues in the report.
 - If equations fail in docx output, retry with word mode first and only fall back to raw-latex mode when the user explicitly wants LaTeX preserved.
+- If `AxMath template not found` appears, do not hardcode a repo-wide path. First retry without `--axmath-template` so the postprocessor can search common install locations. If it still fails, ask the user for the exact `AxMath.dotm` or `AxMath.exe` path and pass it explicitly.
+- If AxMath mode cannot start Word COM or waits during macro execution in a noninteractive runner, rerun it in the logged-in Windows desktop session with `--axmath-visible` and inspect the `.axmath.log`. A successful segmented run should include `Segmented body conversion ranges`, `Segmented body AMSTeX2AM conversion finished`, and `residual_tex=0`.
 - If a user asks for HTML-specific rendering fixes such as list wrapping or hard line breaks, note that this skill is optimized for docx and pdf, not general HTML export.
 
 ## Notes
